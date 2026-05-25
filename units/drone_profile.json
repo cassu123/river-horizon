@@ -1,0 +1,23 @@
+{
+    "drone_id": "RH-ALPHA-01",
+    "model": "Quadcopter X",
+    "weight_kg": 1.5,
+    "flight_params": {
+        "max_altitude_m": 120,
+        "max_speed_ms": 15,
+        "rth_altitude_m": 50,
+        "hover_throttle": 0.5
+    },
+    "safety_limits": {
+        "low_battery_threshold": 20.0,
+        "critical_battery_threshold": 10.0,
+        "geofence_radius_m": 500.0,
+        "signal_timeout_s": 5.0
+    },
+    "connectivity": {
+        "mavlink_connection_string": "/dev/ttyAMA0",
+        "baud_rate": 57600,
+        "cellular_interface": "wwan0",
+        "vpn_enabled": true
+    }
+}

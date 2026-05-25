@@ -1,0 +1,9 @@
+pymavlink
+pyserial
+requests
+flask
+opencv-python
+numpy
+pyyaml
+python-dotenv
+psutil

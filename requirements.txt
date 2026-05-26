@@ -28,5 +28,9 @@ psutil==5.9.8
 pytest==8.2.0
 pytest-asyncio==0.23.6
 
+# --- LoRa Backup Beacon (optional — falls back to sim mode if hardware absent) ---
+meshtastic>=2.3.0
+pypubsub>=4.0.3
+
 # --- Optional: MAVSDK (alternative to pymavlink) ---
 # mavsdk==1.4.3

@@ -84,6 +84,7 @@ from vision.obstacle_detect import ObstacleDetector
 
 from remote.web_controller import WebController
 from connectivity.command_poller import CommandPoller
+from connectivity.meshtastic_beacon import MeshtasticBeacon
 from core.fleet_manager import fleet, DroneUnit, FleetManager
 from sim.sitl import SITLBackend
 
@@ -382,6 +383,24 @@ async def run() -> None:
     cellular, vpn, api_client, stream_manager = await initialise_connectivity(fault_manager)
 
     # ------------------------------------------------------------------
+    # 3b. Meshtastic backup beacon
+    # ------------------------------------------------------------------
+    meshtastic_port = os.getenv("MESHTASTIC_PORT", "/dev/ttyUSB1")
+    beacon = MeshtasticBeacon(
+        drone_id=config.drone_id,
+        port=meshtastic_port,
+        bridge=bridge,
+        fault_manager=fault_manager,
+        on_rth=rth_controller.execute_rth,
+        on_land=flight_controller.land,
+        cellular_rssi=lambda: cellular.rssi_dbm,
+        sim_mode=SITLBackend.active,
+    )
+    await beacon.initialise()
+    logger.info("  ✓ Meshtastic beacon ready  (port=%s, sim=%s)",
+                meshtastic_port, SITLBackend.active)
+
+    # ------------------------------------------------------------------
     # 4. Vision
     # ------------------------------------------------------------------
     camera, stream_server, obstacle_detector = await initialise_vision(stream_manager)
@@ -463,6 +482,7 @@ async def run() -> None:
         asyncio.create_task(obstacle_detector.run(),    name="obstacle_detector"),
         asyncio.create_task(web_controller.run(),       name="web_controller"),
         asyncio.create_task(command_poller.run(),       name="command_poller"),
+        asyncio.create_task(beacon.run(),               name="meshtastic_beacon"),
     ]
 
     # Add SITL physics loop as a background task when sim mode is active
@@ -487,6 +507,7 @@ async def run() -> None:
     await asyncio.gather(*tasks, return_exceptions=True)
 
     # Teardown in reverse-init order
+    await beacon.shutdown()
     await command_poller.shutdown()
     await web_controller.shutdown()
     await stream_server.shutdown()

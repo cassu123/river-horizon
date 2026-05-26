@@ -1,9 +1,32 @@
-pymavlink
-pyserial
-requests
-flask
-opencv-python
-numpy
-pyyaml
-python-dotenv
-psutil
+# ============================================================
+# River Horizon — Autonomous Drone Fleet Management System
+# requirements.txt
+# Python 3.11+  |  Raspberry Pi Zero 2W / Pi 5
+# ============================================================
+
+# --- MAVLink & Flight Control ---
+pymavlink==2.4.41
+pyserial==3.5
+
+# --- Async Web Framework & HTTP ---
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+aiohttp==3.9.5
+
+# --- Vision ---
+opencv-python-headless==4.9.0.80
+numpy==1.26.4
+
+# --- Configuration & Environment ---
+python-dotenv==1.0.1
+pyyaml==6.0.1
+
+# --- System Utilities ---
+psutil==5.9.8
+
+# --- Testing ---
+pytest==8.2.0
+pytest-asyncio==0.23.6
+
+# --- Optional: MAVSDK (alternative to pymavlink) ---
+# mavsdk==1.4.3

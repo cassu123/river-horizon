@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+
+# Environment & secrets
+.env
+.env.local
+
+# Logs (generated at runtime)
+logs/
+*.log
+
+# Calibration / data output
+telemetry_data/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# RiverSongAI lives in its own repo
+RiverSongAI/

@@ -1,23 +1,80 @@
 {
+    "_comment": "River Horizon drone unit profile. Copy and rename for each unit in your fleet.",
     "drone_id": "RH-ALPHA-01",
-    "model": "Quadcopter X",
+    "model": "Quadcopter X — Pixhawk 6C / Raspberry Pi 5",
     "weight_kg": 1.5,
+    "description": "Primary reconnaissance unit. 4G LTE + WireGuard VPN. River Song fleet unit 1.",
+
     "flight_params": {
         "max_altitude_m": 120,
         "max_speed_ms": 15,
         "rth_altitude_m": 50,
-        "hover_throttle": 0.5
+        "hover_throttle": 0.5,
+        "takeoff_altitude_m": 10,
+        "waypoint_radius_m": 2.0,
+        "loiter_time_s": 5.0
     },
+
     "safety_limits": {
         "low_battery_threshold": 20.0,
         "critical_battery_threshold": 10.0,
         "geofence_radius_m": 500.0,
-        "signal_timeout_s": 5.0
+        "geofence_max_altitude_m": 120.0,
+        "signal_timeout_s": 5.0,
+        "min_rssi_dbm": -90,
+        "obstacle_stop_distance_m": 3.0
     },
+
     "connectivity": {
         "mavlink_connection_string": "/dev/ttyAMA0",
         "baud_rate": 57600,
         "cellular_interface": "wwan0",
-        "vpn_enabled": true
-    }
+        "vpn_enabled": true,
+        "vpn_interface": "wg0",
+        "vpn_config_path": "/etc/wireguard/wg0.conf",
+        "telemetry_host": "",
+        "telemetry_port": 14550
+    },
+
+    "streaming": {
+        "enabled": true,
+        "port": 8554,
+        "width": 1280,
+        "height": 720,
+        "fps": 30,
+        "camera_index": 0,
+        "on_demand": true
+    },
+
+    "river_song": {
+        "base_url": "",
+        "api_key": "",
+        "_note": "Set RIVER_SONG_API_URL and RIVER_SONG_API_KEY environment variables. Do not store keys in this file.",
+        "api_prefix": "/api/horizon",
+        "enabled": true
+    },
+
+    "named_waypoints": [
+        {
+            "name": "home base",
+            "latitude": 0.0,
+            "longitude": 0.0,
+            "altitude_m": 10.0,
+            "_note": "Replace with actual home coordinates before flight."
+        },
+        {
+            "name": "waypoint alpha",
+            "latitude": 0.0,
+            "longitude": 0.0,
+            "altitude_m": 30.0,
+            "_note": "Replace with actual coordinates."
+        },
+        {
+            "name": "waypoint bravo",
+            "latitude": 0.0,
+            "longitude": 0.0,
+            "altitude_m": 30.0,
+            "_note": "Replace with actual coordinates."
+        }
+    ]
 }

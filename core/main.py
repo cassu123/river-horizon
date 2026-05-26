@@ -13,9 +13,11 @@ Part of:    River Song AI Ecosystem (riversongai.com)
 ================================================================================
 """
 
+import argparse
 import asyncio
 import logging
 import logging.handlers
+import os
 import signal
 import sys
 from pathlib import Path
@@ -83,6 +85,7 @@ from vision.obstacle_detect import ObstacleDetector
 from remote.web_controller import WebController
 from connectivity.command_poller import CommandPoller
 from core.fleet_manager import fleet, DroneUnit, FleetManager
+from sim.sitl import SITLBackend
 
 
 # ---------------------------------------------------------------------------
@@ -341,11 +344,16 @@ async def run() -> None:
     Primary async coroutine. Bootstraps all subsystems in safety-first order,
     then runs the main control loop until a shutdown signal is received.
     """
+    sitl = SITLBackend.get()
+    sim_label = "  [SIMULATION MODE — no drone required]" if sitl else ""
+
     logger.info("=" * 72)
     logger.info("  River Horizon — Drone Fleet Management System")
     logger.info("  Drone ID : %s", config.drone_id)
     logger.info("  Model    : %s", config.model)
     logger.info("  Version  : 1.0.0")
+    if sim_label:
+        logger.info(sim_label)
     logger.info("=" * 72)
 
     # Register OS signal handlers
@@ -397,7 +405,51 @@ async def run() -> None:
     )
 
     # ------------------------------------------------------------------
-    # 7. Start all background tasks
+    # 7. River Song command poller
+    # ------------------------------------------------------------------
+    command_poller = CommandPoller(
+        drone_id=config.drone_id,
+        api_client=api_client,
+        flight_controller=flight_controller,
+        waypoint_manager=waypoint_manager,
+        mode_manager=mode_manager,
+        stream_manager=stream_manager,
+        fault_manager=fault_manager,
+    )
+
+    # ------------------------------------------------------------------
+    # 8. Load named waypoints from drone profile
+    # ------------------------------------------------------------------
+    _load_named_waypoints(waypoint_manager)
+
+    # ------------------------------------------------------------------
+    # 9. Register this unit with the fleet manager
+    # ------------------------------------------------------------------
+    unit = DroneUnit(
+        drone_id=config.drone_id,
+        model=config.model,
+        flight_controller=flight_controller,
+        waypoint_manager=waypoint_manager,
+        mode_manager=mode_manager,
+        telemetry_collector=collector,
+        fault_manager=fault_manager,
+        stream_manager=stream_manager,
+    )
+    await fleet.register_unit(unit)
+
+    # ------------------------------------------------------------------
+    # 10. Register this drone with the River Song API
+    # ------------------------------------------------------------------
+    if config.river_song.enabled:
+        await api_client.register_drone({
+            "drone_id": config.drone_id,
+            "model": config.model,
+            "weight_kg": config.weight_kg,
+            "api_prefix": config.river_song.api_prefix,
+        })
+
+    # ------------------------------------------------------------------
+    # 11. Start all background tasks
     # ------------------------------------------------------------------
     logger.info("Starting background tasks...")
     tasks = [
@@ -410,17 +462,22 @@ async def run() -> None:
         asyncio.create_task(stream_server.run(),        name="stream_server"),
         asyncio.create_task(obstacle_detector.run(),    name="obstacle_detector"),
         asyncio.create_task(web_controller.run(),       name="web_controller"),
+        asyncio.create_task(command_poller.run(),       name="command_poller"),
     ]
+
+    # Add SITL physics loop as a background task when sim mode is active
+    if sitl is not None:
+        tasks.append(asyncio.create_task(sitl.run(), name="sitl_physics"))
 
     logger.info("River Horizon is operational. Drone '%s' ready.", config.drone_id)
 
     # ------------------------------------------------------------------
-    # 8. Wait for shutdown signal
+    # 12. Wait for shutdown signal
     # ------------------------------------------------------------------
     await _shutdown_event.wait()
 
     # ------------------------------------------------------------------
-    # 9. Graceful shutdown
+    # 13. Graceful shutdown
     # ------------------------------------------------------------------
     logger.info("Shutting down River Horizon...")
 
@@ -430,6 +487,7 @@ async def run() -> None:
     await asyncio.gather(*tasks, return_exceptions=True)
 
     # Teardown in reverse-init order
+    await command_poller.shutdown()
     await web_controller.shutdown()
     await stream_server.shutdown()
     await camera.shutdown()
@@ -437,20 +495,75 @@ async def run() -> None:
     await cellular.shutdown()
     await vpn.shutdown()
     await bridge.disconnect()
+    await fleet.deregister_unit(config.drone_id)
     await fault_manager.shutdown()
 
     logger.info("River Horizon shutdown complete. Goodbye.")
 
 
+def _load_named_waypoints(waypoint_manager) -> None:
+    """
+    Load named waypoints from the drone profile into the waypoint manager.
+
+    Reads the 'named_waypoints' array from drone_profile.json and registers
+    each entry so they are available for River Song voice commands like
+    "fly to waypoint alpha".
+
+    Args:
+        waypoint_manager: Active WaypointManager to register waypoints into.
+    """
+    from flight.waypoint_manager import Waypoint
+
+    raw_waypoints = config.get("named_waypoints", [])
+    if not raw_waypoints:
+        logger.info("No named waypoints found in drone profile.")
+        return
+
+    loaded = 0
+    for entry in raw_waypoints:
+        try:
+            wp = Waypoint(
+                name=entry["name"],
+                latitude=float(entry["latitude"]),
+                longitude=float(entry["longitude"]),
+                altitude_m=float(entry["altitude_m"]),
+                loiter_time_s=float(entry.get("loiter_time_s", 0.0)),
+            )
+            waypoint_manager.register_waypoint(wp)
+            loaded += 1
+        except (KeyError, ValueError, TypeError) as exc:
+            logger.warning("Skipping invalid waypoint entry %s: %s", entry, exc)
+
+    logger.info("Loaded %d named waypoint(s) from drone profile.", loaded)
+
+
 def main() -> None:
     """
-    Synchronous entry point. Validates config then hands off to asyncio.
+    Synchronous entry point. Parses CLI args, validates config, then runs.
+
+    Usage:
+        python3 -m core.main          # real drone mode
+        python3 -m core.main --sim    # SITL simulation mode (no drone needed)
 
     Raises:
         SystemExit: On configuration error or unhandled exception.
     """
+    parser = argparse.ArgumentParser(
+        prog="python3 -m core.main",
+        description="River Horizon — Autonomous Drone Fleet Management",
+    )
+    parser.add_argument(
+        "--sim", action="store_true", default=False,
+        help="Run in SITL simulation mode (no physical drone required). "
+             "Also activated by SIM_MODE=true environment variable.",
+    )
+    args = parser.parse_args()
+
+    # Activate SITL if requested via flag or env var
+    if args.sim or os.getenv("SIM_MODE", "").lower() in ("1", "true", "yes"):
+        SITLBackend.activate()
+
     try:
-        # Config is already loaded at import time; log a summary
         logger.debug("Config loaded: %r", config)
     except ConfigError as exc:
         logger.critical("Configuration error: %s", exc)
@@ -459,7 +572,7 @@ def main() -> None:
     try:
         asyncio.run(run())
     except KeyboardInterrupt:
-        pass  # Handled by signal handler above
+        pass
     except Exception as exc:  # pylint: disable=broad-except
         logger.critical("Unhandled exception in main loop: %s", exc, exc_info=True)
         sys.exit(1)

@@ -24,6 +24,8 @@ try:
 except ImportError:
     CV2_AVAILABLE = False
 
+from sim.sitl import SITLBackend
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,13 +70,19 @@ class CameraManager:
 
     async def initialise(self) -> None:
         """
-        Open the camera device.
+        Open the camera device. In SITL mode, no real device is opened.
 
         Raises:
-            CameraError: If the camera cannot be opened.
+            CameraError: If the camera cannot be opened (real mode only).
         """
+        sitl = SITLBackend.get()
+        if sitl is not None:
+            logger.info("Camera initialised in SITL mode — synthetic frames enabled.")
+            self._open = True
+            return
+
         if not CV2_AVAILABLE:
-            logger.warning("OpenCV not available — camera running in simulation mode.")
+            logger.warning("OpenCV not available — camera running in blank-frame mode.")
             self._open = True
             return
 
@@ -94,14 +102,20 @@ class CameraManager:
         """
         Read the next frame from the camera asynchronously.
 
+        In SITL mode returns a synthetic gradient frame with telemetry overlay.
+
         Returns:
             BGR frame as a numpy array, or None if the read failed.
         """
         if not self._open:
             return None
 
+        sitl = SITLBackend.get()
+        if sitl is not None:
+            self._frame_count += 1
+            return sitl.camera_frame(self._width, self._height)
+
         if not CV2_AVAILABLE:
-            # Return a blank frame in simulation mode
             return np.zeros((self._height, self._width, 3), dtype=np.uint8)
 
         async with self._lock:

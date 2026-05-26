@@ -34,6 +34,7 @@ from core.constants import (
     ConnectionState,
     SystemStatus,
 )
+from sim.sitl import SITLBackend
 
 logger = logging.getLogger(__name__)
 
@@ -161,13 +162,20 @@ class MAVLinkBridge:
         """
         Open the MAVLink connection and wait for the first heartbeat.
 
+        In SITL mode (SIM_MODE=true or SITLBackend.activate() called) the
+        connection is skipped and the SITL physics backend is used instead.
+
         Raises:
             MAVLinkBridgeError: If the connection cannot be established or
                                 no heartbeat is received within the timeout.
         """
-        if not MAVLINK_AVAILABLE:
-            logger.warning("pymavlink not installed — running in simulation mode.")
+        sitl = SITLBackend.get()
+        if sitl is not None or not MAVLINK_AVAILABLE:
+            mode = "SITL" if sitl else "no-pymavlink"
+            logger.warning("[%s] MAVLink bridge running in simulation mode (%s).",
+                           self._drone_id, mode)
             self._state = ConnectionState.CONNECTED
+            await self.vehicle_state.update(last_heartbeat=time.monotonic())
             return
 
         logger.info("[%s] Connecting to flight controller: %s",
@@ -219,14 +227,19 @@ class MAVLinkBridge:
 
     async def run(self) -> None:
         """
-        Main receive loop. Reads incoming MAVLink messages and dispatches
-        them to registered handlers. Also sends periodic heartbeats.
-        Runs until disconnect() is called.
+        Main receive loop. In real mode: reads MAVLink messages and sends
+        heartbeats. In SITL mode: pumps the SITL physics state into
+        vehicle_state at 10 Hz.
         """
         self._running = True
+
+        sitl = SITLBackend.get()
+        if sitl is not None or not MAVLINK_AVAILABLE:
+            await self._run_sitl(sitl)
+            return
+
         last_hb = 0.0
         loop = asyncio.get_running_loop()
-
         logger.info("[%s] MAVLink receive loop started.", self._drone_id)
 
         while self._running:
@@ -257,6 +270,28 @@ class MAVLinkBridge:
                     logger.error("[%s] MAVLink receive error: %s", self._drone_id, exc)
 
             await asyncio.sleep(0.01)  # 100 Hz poll ceiling
+
+    async def _run_sitl(self, sitl: Optional[Any]) -> None:
+        """
+        SITL state-pump loop. Mirrors SITLBackend vehicle state into
+        vehicle_state at 10 Hz so all consumers see live simulated data.
+        """
+        logger.info("[%s] SITL bridge loop started.", self._drone_id)
+        while self._running:
+            try:
+                if sitl is not None:
+                    snap = sitl.snapshot()
+                    await self.vehicle_state.update(**snap)
+                else:
+                    # No SITL backend, just keep heartbeat alive
+                    await self.vehicle_state.update(last_heartbeat=time.monotonic())
+                await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.error("[%s] SITL pump error: %s", self._drone_id, exc)
+                await asyncio.sleep(0.5)
+        logger.info("[%s] SITL bridge loop stopped.", self._drone_id)
 
     # ------------------------------------------------------------------
     # Command interface
@@ -311,6 +346,9 @@ class MAVLinkBridge:
         Returns:
             True if the mode change command was sent successfully.
         """
+        sitl = SITLBackend.get()
+        if sitl is not None:
+            return await sitl.set_mode(mode_name)
         if not self._connection or not MAVLINK_AVAILABLE:
             logger.debug("[%s] Simulation: set_mode(%s)", self._drone_id, mode_name)
             await self.vehicle_state.update(flight_mode=mode_name)
@@ -339,6 +377,9 @@ class MAVLinkBridge:
         """
         param2 = 21196.0 if force else 0.0
         logger.info("[%s] Arming motors (force=%s).", self._drone_id, force)
+        sitl = SITLBackend.get()
+        if sitl is not None:
+            return await sitl.arm()
         if not MAVLINK_AVAILABLE:
             await self.vehicle_state.update(armed=True)
             return True
@@ -354,6 +395,9 @@ class MAVLinkBridge:
             True if the disarm command was sent successfully.
         """
         logger.info("[%s] Disarming motors.", self._drone_id)
+        sitl = SITLBackend.get()
+        if sitl is not None:
+            return await sitl.disarm()
         if not MAVLINK_AVAILABLE:
             await self.vehicle_state.update(armed=False)
             return True

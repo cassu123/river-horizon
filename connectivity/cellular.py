@@ -19,6 +19,7 @@ import time
 from typing import Optional
 
 from core.constants import SIGNAL_CHECK_INTERVAL_S, SystemStatus
+from sim.sitl import SITLBackend
 
 logger = logging.getLogger(__name__)
 
@@ -103,8 +104,18 @@ class CellularMonitor:
     async def _poll_signal(self) -> None:
         """
         Read RSSI and connection state from the system.
-        Uses nmcli if available; falls back to a simulated value.
+        Uses nmcli if available; falls back to SITL or a static sim value.
         """
+        sitl = SITLBackend.get()
+        if sitl is not None:
+            rssi = sitl.rssi_dbm()
+            self._rssi_dbm = rssi
+            self._connected = True
+            self._status = SystemStatus.OK
+            self._last_check = time.monotonic()
+            logger.debug("[cellular][SITL] RSSI=%ddBm", rssi)
+            return
+
         loop = asyncio.get_running_loop()
         rssi = await loop.run_in_executor(None, self._read_rssi_sync)
         self._rssi_dbm = rssi
